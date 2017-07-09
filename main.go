@@ -1,92 +1,15 @@
 package main
 
 import (
-	"errors"
 	"fmt"
-	"net"
 	"net/http"
 	"os"
 
 	log "github.com/Sirupsen/logrus"
+	flag "github.com/spf13/pflag"
 
-	"github.com/jesk78/anyflow/proto/netflow"
 	"github.com/prometheus/client_golang/prometheus"
 )
-
-type Packet struct {
-	Raw   []byte
-	Saddr *net.UDPAddr
-	Proto string
-}
-
-func CheckError(err error) {
-	if err != nil {
-		log.Fatalf("Error: ", err)
-		os.Exit(0)
-	}
-}
-
-func Parse(b []byte, addr *net.UDPAddr) (*Packet, error) {
-	p := new(Packet)
-	// parse for flow netflowcol
-	switch b[1] {
-	case 9:
-		*p = Packet{Raw: b, Saddr: addr, Proto: "nf9"}
-	default:
-		return p, errors.New("No flow packet")
-	}
-	return p, nil
-}
-
-func receivePackets(c *net.UDPConn) {
-	buf := make([]byte, 9000)
-
-	for {
-		n, addr, err := c.ReadFromUDP(buf)
-		if err != nil {
-			log.Errorf("Error: ", err)
-			continue
-		}
-
-		packetSourceIP := addr.IP.String()
-		packetsTotal.WithLabelValues(packetSourceIP).Inc()
-		log.Infof("Packet source: ", packetSourceIP)
-
-		p, err := Parse(buf[:n], addr)
-		if err != nil {
-			log.Errorf("Error parsing packet: ", err)
-			continue
-		}
-
-		switch p.Proto {
-		case "nf9":
-			nf, err := netflow.New(p.Raw, p.Saddr)
-			if err != nil {
-				log.Errorf("Error parsing netflow nf9 packet: ", err)
-				continue
-			}
-
-			if !nf.HasFlows() {
-				log.Debug("No flows in nf9 packet")
-				continue
-			}
-
-			records, err := nf.GetFlows()
-			if err != nil {
-				log.Errorf("Error getting flows from packet: ", err)
-				continue
-			}
-
-			log.Infof("Number of flow packet records: ", len(records))
-
-			for i, r := range records {
-				for _, v := range r.Values {
-					log.Infof("Flow record: %d type: %v value: %v", i, v.GetType(), v.GetValue())
-				}
-			}
-		}
-	}
-}
 
 func init() {
 	log.SetFormatter(&log.TextFormatter{})
@@ -96,20 +19,56 @@ func init() {
 	prometheus.MustRegister(packetsTotal)
 }
 
+func parseArgs() (Config, error) {
+	c := Config{
+		AggregatorDefinitions: map[string]AggregatorDefinition{},
+	}
+
+	var aggdefs []string
+	flag.StringArrayVar(&aggdefs, "aggregator", nil,
+		"Aggregator to create. Format: <name>,<Source>:<Column>,...")
+
+	flag.StringVar(&c.FlowListenAddress, "flow-port", ":10001",
+		"UDP port to receive flows")
+
+	flag.StringVar(&c.MetricListenAddress, "metric-port", ":8080",
+		"TCP port to serve metrics")
+
+	flag.Parse()
+
+	if len(aggdefs) == 0 {
+		flag.Usage()
+		return c, fmt.Errorf("no aggegators specified")
+	}
+
+	for _, d := range aggdefs {
+		agg, err := ParseAggregator(d)
+		if err != nil {
+			return c, err
+		}
+		c.AggregatorDefinitions[agg.Name] = *agg
+	}
+
+	return c, nil
+}
+
 func main() {
-	httpListenAddress := ":8080"
-	flowListenAddress := ":10001"
+	os.Exit(run())
+}
 
-	log.Infof("Flow listening on %s", flowListenAddress)
-	ServerAddr, err := net.ResolveUDPAddr("udp", flowListenAddress)
-	CheckError(err)
+func run() int {
+	c, err := parseArgs()
+	if err != nil {
+		log.Fatal(err)
+		return 1
+	}
 
-	ServerConn, err := net.ListenUDP("udp", ServerAddr)
-	CheckError(err)
-
-	defer ServerConn.Close()
-
-	go receivePackets(ServerConn)
+	app, err := InitApp(c)
+	if err != nil {
+		log.Fatal(err)
+		return 1
+	}
+	app.Start()
 
 	http.Handle("/metrics", prometheus.Handler())
 	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
@@ -122,8 +81,10 @@ func main() {
             </html>`))
 	})
 
-	log.Infof("HTTP listening on %s", httpListenAddress)
-	if err := http.ListenAndServe(httpListenAddress, nil); err != nil {
+	log.Infof("HTTP listening on %s", c.MetricListenAddress)
+	if err := http.ListenAndServe(c.MetricListenAddress, nil); err != nil {
 		panic(fmt.Errorf("Error starting HTTP server: %s", err))
 	}
+
+	return 0
 }
