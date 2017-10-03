@@ -92,6 +92,10 @@ func (a *Aggregator) Extract(r EnrichedRecord) (prometheus.Labels, []counterUpda
 
 // Update actually changes the Prometheus counters
 func (a *Aggregator) Update(r EnrichedRecord) {
+	labels, cus := a.Extract(r)
+	for _, cu := range cus {
+		cu.c.With(labels).Add(cu.val)
+	}
 }
 
 // fkey combines the u8 provider id and the u16 field id in to a single
