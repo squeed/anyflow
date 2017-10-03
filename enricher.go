@@ -1,6 +1,10 @@
 package main
 
-import "github.com/jesk78/anyflow/proto/netflow"
+import (
+	"fmt"
+
+	"github.com/jesk78/anyflow/proto/netflow"
+)
 
 type EnrichedRecord map[SourceID]*netflow.Record
 
@@ -72,4 +76,11 @@ func (f *FlowSource) Fields() map[string]Field {
 
 func bytesToString(b []byte) string {
 	return string(b)
+}
+
+func PrintFields(s Source) {
+	sName := s.Name()
+	for name, _ := range s.Fields() {
+		fmt.Printf("%s:%s\n", sName, name)
+	}
 }

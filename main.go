@@ -20,6 +20,8 @@ func init() {
 }
 
 func parseArgs() (Config, error) {
+	listFields := false
+
 	c := Config{
 		AggregatorDefinitions: map[string]AggregatorDefinition{},
 	}
@@ -34,7 +36,16 @@ func parseArgs() (Config, error) {
 	flag.StringVar(&c.MetricListenAddress, "metric-port", ":8080",
 		"TCP port to serve metrics")
 
+	flag.BoolVar(&listFields, "list-fields", false, "List fields and quit")
+
 	flag.Parse()
+
+	if listFields {
+		for _, s := range availSources {
+			PrintFields(s)
+		}
+		os.Exit(1)
+	}
 
 	if len(aggdefs) == 0 {
 		flag.Usage()

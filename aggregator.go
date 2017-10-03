@@ -7,6 +7,10 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 )
 
+// An Aggregator represents a set of one or more counters, along
+// with the Fields by which the values should be aggregated.
+// For example, one might aggregate by AS and portnum, and create
+// one counter for packets and one counter for bytes.
 type Aggregator struct {
 	Def    AggregatorDefinition
 	fields map[uint32]Field
@@ -38,7 +42,7 @@ func NewAggregator(d AggregatorDefinition) (*Aggregator, error) {
 			c: prometheus.NewCounterVec(
 				prometheus.CounterOpts{
 					Name: fmt.Sprintf("%s_%s_%s", METRIC_PREFIX, d.Name, f.Name),
-					Help: "some stuff",
+					Help: "some stuff", // TODO
 				},
 				fieldNames,
 			),
@@ -86,6 +90,7 @@ func (a *Aggregator) Extract(r EnrichedRecord) (prometheus.Labels, []counterUpda
 	return labels, cu
 }
 
+// Update actually changes the Prometheus counters
 func (a *Aggregator) Update(r EnrichedRecord) {
 }
 
